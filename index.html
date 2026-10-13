@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CIT ポータル & TOTP ログイン支援</title>
+  <meta name="description" content="大学ポータルへのログインとTOTP生成を1画面で完結。期限切れ防止自動コピー機能搭載。">
+  <meta name="theme-color" content="#1e293b">
+
+  <!-- PWA Manifest & Icons -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- Tailwind CSS (CDN & フォールバック) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- OTPAuth Library (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/otpauth/dist/otpauth.umd.min.js"></script>
+
+  <style>
+    /* アニメーションとカスタムスタイル */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .animate-pulse-ring {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+    .font-mono-otp {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      letter-spacing: 0.18em;
+    }
+    /* スクロールバーのカスタマイズ */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-hidden">
+
+  <!-- ヘッダーバー -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between shrink-0 shadow-md">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+          CIT ポータル ＆ TOTP 統合マネージャー
+          <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-normal">PWA Ready</span>
+        </h1>
+        <p class="text-[11px] text-slate-400">1画面で完結する大学ポータルログイン＆期限切れ回避</p>
+      </div>
+    </div>
+
+    <!-- 右上アクション -->
+    <div class="flex items-center space-x-2">
+      <!-- モバイル用ビュー切り替えタブ (小画面のみ表示) -->
+      <div class="md:hidden flex bg-slate-800 p-0.5 rounded-lg border border-slate-700">
+        <button id="mobileTabOtp" onclick="switchMobileTab('otp')" class="px-2.5 py-1 text-xs font-medium rounded-md bg-blue-600 text-white">OTP</button>
+        <button id="mobileTabPortal" onclick="switchMobileTab('portal')" class="px-2.5 py-1 text-xs font-medium rounded-md text-slate-400 hover:text-white">ポータル</button>
+      </div>
+
+      <!-- 設定・アカウント追加モーダルボタン -->
+      <button onclick="openConfigModal()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition">
+        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+        </svg>
+        <span>設定 / 鍵登録</span>
+      </button>
+
+      <!-- PWAインストールボタン（対応環境のみ表示） -->
+      <button id="pwaInstallBtn" style="display: none;" onclick="installPwa()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+        </svg>
+        <span>アプリ追加</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ領域（左右分割） -->
+  <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+
+    <!-- ============================================== -->
+    <!-- 左側 / OTP ジェネレーター サイドバー -->
+    <!-- ============================================== -->
+    <aside id="otpPane" class="w-full md:w-96 lg:w-[420px] bg-slate-900/90 border-r border-slate-800 flex flex-col shrink-0 overflow-y-auto">
+      
+      <!-- アカウント切り替えセレクター -->
+      <div class="p-4 border-b border-slate-800 bg-slate-900/50">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs font-medium text-slate-400">対象アカウント</label>
+          <button onclick="openConfigModal()" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+            <span>+ 新規追加</span>
+          </button>
+        </div>
+        <div class="relative">
+          <select id="accountSelector" onchange="onAccountChange()" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition">
+            <!-- JSで動的生成 -->
+          </select>
+        </div>
+      </div>
+
+      <!-- メインOTP表示カード -->
+      <div class="p-5 flex-1 flex flex-col justify-between">
+        
+        <div class="space-y-5">
+          <!-- 期限切れ回避ステータスバナー -->
+          <div id="safetyBanner" class="rounded-xl p-3 bg-slate-800/80 border border-slate-700 flex items-center justify-between transition-all duration-300">
+            <div class="flex items-center space-x-2.5">
+              <div id="safetyIconContainer" class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <svg id="safetyIconOk" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <svg id="safetyIconWait" class="w-5 h-5 hidden animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+              </div>
+              <div>
+                <p id="safetyTitle" class="text-xs font-semibold text-slate-200">コード有効（入力可能）</p>
+                <p id="safetySub" class="text-[11px] text-slate-400">余裕を持ってログインを完了できます</p>
+              </div>
+            </div>
+            <!-- 秒数リングまたはバッジ -->
+            <div class="text-right">
+              <span id="remainingSecondsBadge" class="text-xs font-bold px-2.5 py-1 rounded-md bg-slate-700 text-slate-200">-- 秒</span>
+            </div>
+          </div>
+
+          <!-- 6桁コード大型表示エリア -->
+          <div class="relative bg-slate-950/60 rounded-2xl p-6 border border-slate-800 shadow-inner flex flex-col items-center justify-center group">
+            
+            <!-- プログレスバー（上部バー） -->
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mb-6">
+              <div id="timeProgressBar" class="h-full bg-emerald-500 transition-all duration-300" style="width: 100%;"></div>
+            </div>
+
+            <!-- コード表示 -->
+            <div class="text-center relative">
+              <span id="totpCodeDisplay" onclick="copyCurrentCode(true)" class="font-mono-otp text-4xl lg:text-5xl font-extrabold text-white tracking-widest cursor-pointer select-all hover:text-blue-400 transition-colors py-2 px-3 block rounded-lg">
+                --- ---
+              </span>
+              <div class="text-[11px] text-slate-500 mt-1 flex items-center justify-center gap-1">
+                <span>タップで直接コピー</span>
+              </div>
+            </div>
+
+            <!-- 残り時間サークル & 秒数 -->
+            <div class="mt-4 flex items-center space-x-2 text-slate-400 text-xs">
+              <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke-width="2"></circle>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"></path>
+              </svg>
+              <span>有効期限:</span>
+              <span id="remainingSecondsText" class="font-bold text-slate-200">--</span>
+              <span>秒</span>
+            </div>
+
+            <!-- 次のコード待機オーバーレイ（残り5秒未満の時） -->
+            <div id="waitingOverlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-[2px] rounded-2xl flex flex-col items-center justify-center p-4 transition-opacity duration-300 opacity-0 pointer-events-none">
+              <div class="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mb-2 animate-bounce">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </div>
+              <p class="text-sm font-bold text-amber-300 text-center">まもなく期限切れ</p>
+              <p class="text-xs text-amber-200/80 text-center mt-1">次のコードを待機中… (自動コピー待機)</p>
+              <div class="mt-2 text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-3 py-1 rounded-full border border-amber-800">
+                あと <span id="waitSecCountdown">5</span> 秒で新コード生成
+              </div>
+            </div>
+
+          </div>
+
+          <!-- アクションボタン群 -->
+          <div class="grid grid-cols-2 gap-3">
+            <!-- コードをコピーボタン -->
+            <button id="copyBtn" onclick="copyCurrentCode(true)" class="flex items-center justify-center space-x-2 py-3 px-4 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-semibold rounded-xl shadow-lg shadow-blue-900/30 transition-all">
+              <svg id="copyIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+              </svg>
+              <svg id="copiedIcon" class="w-5 h-5 hidden text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+              <span id="copyBtnText">コードをコピー</span>
+            </button>
+
+            <!-- ポータルへ貼り付け/送信ボタン -->
+            <button id="pasteBtn" onclick="sendToPortal()" class="flex items-center justify-center space-x-2 py-3 px-4 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-100 font-semibold rounded-xl border border-slate-700 transition-all">
+              <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+              </svg>
+              <span>ポータルへ貼付</span>
+            </button>
+          </div>
+
+          <!-- 期限切れ回避・自動化オプション -->
+          <div class="bg-slate-800/60 rounded-xl p-4 border border-slate-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <label for="autoCopyToggle" class="text-xs font-semibold text-slate-200 cursor-pointer">新コード自動コピー</label>
+                <p class="text-[11px] text-slate-400">更新瞬間にクリップボードへ自動格納</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="autoCopyToggle" class="sr-only peer" checked onchange="savePreferences()">
+                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between pt-2 border-t border-slate-700/50">
+              <div>
+                <label for="soundToggle" class="text-xs font-semibold text-slate-200 cursor-pointer">更新通知音</label>
+                <p class="text-[11px] text-slate-400">新しいコード生成時にチャイム再生</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="soundToggle" class="sr-only peer" checked onchange="savePreferences()">
+                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 下部ヒント・ステータス -->
+        <div class="mt-6 pt-4 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+          <span>シークレット: <span id="secretStatusText" class="font-mono text-slate-300">設定済み</span></span>
+          <button onclick="toggleSideWindow()" class="text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+            <span>別窓で並べて開く ↗</span>
+          </button>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- ============================================== -->
+    <!-- 右側 / 大学ポータル 埋め込みビュー (Iframe & WebView) -->
+    <!-- ============================================== -->
+    <main id="portalPane" class="flex-1 flex flex-col bg-slate-950 relative min-w-0">
+      
+      <!-- ポータルナビゲーションツールバー -->
+      <div class="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between gap-3 shrink-0">
+        
+        <div class="flex items-center space-x-2 shrink-0">
+          <!-- リロードボタン -->
+          <button onclick="reloadPortalFrame()" title="再読み込み" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+          </button>
+          <!-- ホームに戻る -->
+          <button onclick="resetPortalUrl()" title="デフォルトURLへ" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- URL入力バー -->
+        <div class="flex-1 max-w-xl flex items-center">
+          <div class="relative w-full flex items-center">
+            <span class="absolute left-3 text-slate-500">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+              </svg>
+            </span>
+            <input type="url" id="portalUrlInput" onkeydown="if(event.key==='Enter') navigatePortalUrl()" placeholder="ポータルURL (例: https://portal.it-chiba.ac.jp/)" class="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-20 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono transition">
+            <button onclick="navigatePortalUrl()" class="absolute right-1 px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-md transition">
+              移動
+            </button>
+          </div>
+        </div>
+
+        <!-- アクションボタン（別タブで開く・並列ウィンドウなど） -->
+        <div class="flex items-center space-x-1.5 shrink-0">
+          <button onclick="toggleSideWindow()" title="右側に別ウィンドウとして並べて開く（X-Frame-Options回避に最適）" class="flex items-center space-x-1 px-2.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-medium rounded-lg border border-blue-500/30 transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+            </svg>
+            <span class="hidden sm:inline">並列ウィンドウ</span>
+          </button>
+          <button onclick="openPortalInNewTab()" title="新しいタブで開く" class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+            </svg>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Iframeコンテナ -->
+      <div class="flex-1 relative bg-slate-950 overflow-hidden flex flex-col">
+        
+        <!-- X-Frame-Options 対策 / 親切なガイドバナー -->
+        <div id="iframeNoticeBanner" class="bg-blue-950/60 border-b border-blue-800/40 px-4 py-2 flex items-center justify-between text-xs text-blue-200 shrink-0">
+          <div class="flex items-center space-x-2">
+            <span class="text-blue-400">ℹ️</span>
+            <span>大学ポータル側がiframe埋め込み（X-Frame-Options）を拒否している場合は、右上の<strong>「並列ウィンドウ」</strong>をご利用ください。</span>
+          </div>
+          <button onclick="dismissBanner()" class="text-blue-400 hover:text-blue-200 text-xs ml-2">✕ 閉じる</button>
+        </div>
+
+        <iframe id="portalFrame" src="https://portal.it-chiba.ac.jp/" class="w-full flex-1 border-0 bg-white" sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-modals" allow="clipboard-read; clipboard-write"></iframe>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- ============================================== -->
+  <!-- トースト通知コンテナ -->
+  <!-- ============================================== -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- ============================================== -->
+  <!-- 設定 / 鍵登録モーダル -->
+  <!-- ============================================== -->
+  <div id="configModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      
+      <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+        <h2 class="text-base font-bold text-white flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+          </svg>
+          TOTP 鍵登録 ＆ アプリ設定
+        </h2>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">✕</button>
+      </div>
+
+      <div class="p-6 overflow-y-auto space-y-5 flex-1">
+        
+        <!-- アカウント登録フォーム -->
+        <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <h3 class="text-xs font-semibold text-slate-300">新しいアカウントを追加 / 更新</h3>
+          
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">アカウント名</label>
+            <input type="text" id="modalAccountName" placeholder="例: 千葉工大 (CIT) ポータル" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">
+              TOTP シークレットキー (Base32) または otpauth:// URI
+            </label>
+            <input type="text" id="modalAccountSecret" placeholder="例: JBSWY3DPEHPK3PXP または otpauth://totp/..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500">
+            <p class="text-[10px] text-slate-500 mt-1">※ 空白やハイフンは自動で除去されます。ローカルストレージに安全に保管されます。</p>
+          </div>
+
+          <div class="flex gap-2 pt-1">
+            <button onclick="saveNewAccount()" class="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition">
+              アカウントを保存
+            </button>
+            <button onclick="setSampleDemoAccount()" class="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition border border-slate-700">
+              デモキーを試す
+            </button>
+          </div>
+        </div>
+
+        <!-- 登録済みアカウント一覧 -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-2">登録済みアカウント一覧</label>
+          <div id="modalAccountList" class="space-y-2">
+            <!-- JSで動的生成 -->
+          </div>
+        </div>
+
+        <!-- ポータルURL設定 -->
+        <div class="pt-4 border-t border-slate-800 space-y-2">
+          <label class="block text-xs font-semibold text-slate-300">デフォルトポータル URL</label>
+          <input type="url" id="modalPortalDefaultUrl" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" value="https://portal.it-chiba.ac.jp/">
+        </div>
+
+      </div>
+
+      <div class="px-6 py-3 bg-slate-900 border-t border-slate-800 flex justify-end">
+        <button onclick="closeConfigModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700">
+          閉じる
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- アプリケーションロジック (JavaScript) -->
+  <!-- ============================================== -->
+  <script>
+    /**
+     * CIT ポータル & TOTP マネージャー
+     * - Web Crypto API によるスタンドアロン TOTP 計算 (RFC 6238)
+     * - OTPAuth UMD CDN 対応フォールバック
+     * - 期限切れ回避（5秒未満待機モード＆更新瞬間自動コピー）
+     * - PWA 対応 (Service Worker & Manifest)
+     */
+
+    // デフォルトアカウント（千葉工大 CITポータル想定）
+    const DEFAULT_ACCOUNTS = [
+      {
+        id: 'cit-portal-default',
+        name: '千葉工業大学 (CIT) ポータル',
+        secret: 'JBSWY3DPEHPK3PXP', // サンプル初期シークレット
+        portalUrl: 'https://portal.it-chiba.ac.jp/'
+      }
+    ];
+
+    // アプリケーション状態
+    let appState = {
+      accounts: [],
+      currentAccountId: '',
+      autoCopy: true,
+      soundEnabled: true,
+      defaultPortalUrl: 'https://portal.it-chiba.ac.jp/',
+      lastCode: '',
+      lastPeriodStep: -1,
+      isNearExpiry: false,
+      sideWindowRef: null
+    };
+
+    // 音声効果 (Web Audio API)
+    let audioCtx = null;
+    function playBeepSound(type = 'success') {
+      if (!appState.soundEnabled) return;
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        if (type === 'success') {
+          // 快いピピッという二重音
+          osc.frequency.setValueAtTime(880, now);
+          osc.frequency.setValueAtTime(1320, now + 0.08);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        } else if (type === 'warn') {
+          // 注意音
+          osc.frequency.setValueAtTime(440, now);
+          gain.gain.setValueAtTime(0.1, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+          osc.start(now);
+          osc.stop(now + 0.15);
+        }
+      } catch (e) {
+        console.warn('Audio playback error:', e);
+      }
+    }
+
+    // ==============================================
+    // TOTP アルゴリズム (Pure Web Crypto API & OTPAuth)
+    // ==============================================
+    function base32Decode(base32) {
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      const clean = (base32 || '').toUpperCase().replace(/[\s=-]/g, '');
+      let bits = '';
+      for (let i = 0; i < clean.length; i++) {
+        const val = alphabet.indexOf(clean[i]);
+        if (val === -1) continue;
+        bits += val.toString(2).padStart(5, '0');
+      }
+      const bytes = new Uint8Array(Math.floor(bits.length / 8));
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(bits.substr(i * 8, 8), 2);
+      }
+      return bytes;
+    }
+
+    async function calculateTOTP(secret, period = 30, digits = 6) {
+      const epoch = Math.floor(Date.now() / 1000);
+      const counter = Math.floor(epoch / period);
+      const remaining = period - (epoch % period);
+
+      // 1. もし外部OTPAuthライブラリが利用可能な場合は優先使用
+      if (window.OTPAuth && typeof OTPAuth.TOTP === 'function') {
+        try {
+          const totp = new OTPAuth.TOTP({
+            algorithm: 'SHA1',
+            digits: digits,
+            period: period,
+            secret: secret.trim().replace(/\s+/g, '')
+          });
+          const token = totp.generate();
+          return { token, remaining, counter };
+        } catch (err) {
+          // 失敗時は内蔵Web Cryptoエンジンへフォールバック
+        }
+      }
+
+      // 2. 内蔵 Web Crypto API 実装 (RFC 6238)
+      const keyBytes = base32Decode(secret);
+      if (keyBytes.length === 0) {
+        throw new Error('シークレットキーが無効です');
+      }
+
+      const buffer = new ArrayBuffer(8);
+      const view = new DataView(buffer);
+      view.setBigUint64(0, BigInt(counter));
+
+      const cryptoKey = await window.crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        { name: 'HMAC', hash: { name: 'SHA-1' } },
+        false,
+        ['sign']
+      );
+
+      const signature = await window.crypto.subtle.sign('HMAC', cryptoKey, buffer);
+      const hmac = new Uint8Array(signature);
+
+      const offset = hmac[hmac.length - 1] & 0x0f;
+      const binary =
+        ((hmac[offset] & 0x7f) << 24) |
+        ((hmac[offset + 1] & 0xff) << 16) |
+        ((hmac[offset + 2] & 0xff) << 8) |
+        (hmac[offset + 3] & 0xff);
+
+      const token = (binary % (10 ** digits)).toString().padStart(digits, '0');
+      return { token, remaining, counter };
+    }
+
+    // ==============================================
+    // アプリケーション初期化 & 永続化
+    // ==============================================
+    function initApp() {
+      loadSavedData();
+      renderAccountSelector();
+      setupServiceWorker();
+      setupPwaPrompt();
+      
+      // ポータル初期URL設定
+      const portalInput = document.getElementById('portalUrlInput');
+      const portalFrame = document.getElementById('portalFrame');
+      const defaultUrl = appState.defaultPortalUrl || 'https://portal.it-chiba.ac.jp/';
+      portalInput.value = defaultUrl;
+      portalFrame.src = defaultUrl;
+
+      // TOTP更新ループ開始（毎秒実行）
+      updateTOTPLoop();
+      setInterval(updateTOTPLoop, 500);
+    }
+
+    function loadSavedData() {
+      try {
+        const savedAccounts = localStorage.getItem('cit_totp_accounts');
+        if (savedAccounts) {
+          appState.accounts = JSON.parse(savedAccounts);
+        } else {
+          appState.accounts = [...DEFAULT_ACCOUNTS];
+          saveAccounts();
+        }
+
+        const savedCurrent = localStorage.getItem('cit_totp_current_id');
+        if (savedCurrent && appState.accounts.some(a => a.id === savedCurrent)) {
+          appState.currentAccountId = savedCurrent;
+        } else {
+          appState.currentAccountId = appState.accounts[0]?.id || '';
+        }
+
+        const savedAutoCopy = localStorage.getItem('cit_totp_autocopy');
+        if (savedAutoCopy !== null) {
+          appState.autoCopy = savedAutoCopy === 'true';
+        }
+        document.getElementById('autoCopyToggle').checked = appState.autoCopy;
+
+        const savedSound = localStorage.getItem('cit_totp_sound');
+        if (savedSound !== null) {
+          appState.soundEnabled = savedSound === 'true';
+        }
+        document.getElementById('soundToggle').checked = appState.soundEnabled;
+
+        const savedPortalUrl = localStorage.getItem('cit_totp_portal_url');
+        if (savedPortalUrl) {
+          appState.defaultPortalUrl = savedPortalUrl;
+          document.getElementById('modalPortalDefaultUrl').value = savedPortalUrl;
+        }
+      } catch (e) {
+        console.error('Storage load error:', e);
+        appState.accounts = [...DEFAULT_ACCOUNTS];
+        appState.currentAccountId = appState.accounts[0].id;
+      }
+    }
+
+    function saveAccounts() {
+      localStorage.setItem('cit_totp_accounts', JSON.stringify(appState.accounts));
+    }
+
+    function savePreferences() {
+      appState.autoCopy = document.getElementById('autoCopyToggle').checked;
+      appState.soundEnabled = document.getElementById('soundToggle').checked;
+      localStorage.setItem('cit_totp_autocopy', appState.autoCopy);
+      localStorage.setItem('cit_totp_sound', appState.soundEnabled);
+    }
+
+    // ==============================================
+    // アカウント管理 UI
+    // ==============================================
+    function getCurrentAccount() {
+      return appState.accounts.find(a => a.id === appState.currentAccountId) || appState.accounts[0];
+    }
+
+    function renderAccountSelector() {
+      const select = document.getElementById('accountSelector');
+      select.innerHTML = '';
+      appState.accounts.forEach(acc => {
+        const opt = document.createElement('option');
+        opt.value = acc.id;
+        opt.textContent = acc.name;
+        if (acc.id === appState.currentAccountId) opt.selected = true;
+        select.appendChild(opt);
+      });
+      updateSecretStatusDisplay();
+    }
+
+    function onAccountChange() {
+      const select = document.getElementById('accountSelector');
+      appState.currentAccountId = select.value;
+      localStorage.setItem('cit_totp_current_id', appState.currentAccountId);
+      appState.lastPeriodStep = -1; // 強制再計算
+      updateSecretStatusDisplay();
+      updateTOTPLoop();
+    }
+
+    function updateSecretStatusDisplay() {
+      const acc = getCurrentAccount();
+      const statusEl = document.getElementById('secretStatusText');
+      if (acc && acc.secret) {
+        const masked = acc.secret.slice(0, 4) + '****' + acc.secret.slice(-4);
+        statusEl.textContent = `${acc.name} (${masked})`;
+      } else {
+        statusEl.textContent = '未登録';
+      }
+    }
+
+    // ==============================================
+    // 期限切れ回避 & TOTPリアルタイム更新ループ
+    // ==============================================
+    async function updateTOTPLoop() {
+      const acc = getCurrentAccount();
+      if (!acc || !acc.secret) {
+        document.getElementById('totpCodeDisplay').textContent = '未設定';
+        return;
+      }
+
+      try {
+        const result = await calculateTOTP(acc.secret);
+        const { token, remaining, counter } = result;
+
+        // UI表示更新
+        const formattedCode = token.slice(0, 3) + ' ' + token.slice(3);
+        const codeDisplay = document.getElementById('totpCodeDisplay');
+        const remainingSecText = document.getElementById('remainingSecondsText');
+        const badge = document.getElementById('remainingSecondsBadge');
+        const progressBar = document.getElementById('timeProgressBar');
+        const waitingOverlay = document.getElementById('waitingOverlay');
+        const safetyBanner = document.getElementById('safetyBanner');
+        const safetyTitle = document.getElementById('safetyTitle');
+        const safetySub = document.getElementById('safetySub');
+        const waitSecCountdown = document.getElementById('waitSecCountdown');
+        const safetyIconOk = document.getElementById('safetyIconOk');
+        const safetyIconWait = document.getElementById('safetyIconWait');
+
+        // コード文字列
+        codeDisplay.textContent = formattedCode;
+        remainingSecText.textContent = remaining;
+        badge.textContent = `${remaining}秒`;
+
+        // プログレスバー（30秒基準）
+        const progressPercent = (remaining / 30) * 100;
+        progressBar.style.width = `${progressPercent}%`;
+
+        // ----------------------------------------------
+        // 【重要】期限切れ回避ロジック (残り時間 < 5秒の制御)
+        // ----------------------------------------------
+        if (remaining < 5) {
+          // 残り5秒未満: 「次のコードを待機中…」モードへ移行
+          appState.isNearExpiry = true;
+          progressBar.classList.remove('bg-emerald-500', 'bg-blue-500');
+          progressBar.classList.add('bg-amber-500');
+
+          badge.className = 'text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30';
+          safetyBanner.className = 'rounded-xl p-3 bg-amber-950/40 border border-amber-700/60 flex items-center justify-between transition-all duration-300';
+          
+          safetyTitle.textContent = '⚠️ 次のコードを待機中…';
+          safetyTitle.className = 'text-xs font-bold text-amber-300';
+          safetySub.textContent = `期限切れ回避: あと${remaining}秒で新規コードへ自動切替`;
+          safetySub.className = 'text-[11px] text-amber-400/80';
+
+          safetyIconOk.classList.add('hidden');
+          safetyIconWait.classList.remove('hidden');
+
+          waitSecCountdown.textContent = remaining;
+          waitingOverlay.style.opacity = '1';
+          waitingOverlay.style.pointerEvents = 'auto';
+
+        } else {
+          // 通常状態 (5秒以上残り)
+          appState.isNearExpiry = false;
+          progressBar.classList.remove('bg-amber-500');
+          progressBar.classList.add('bg-emerald-500');
+
+          badge.className = 'text-xs font-bold px-2.5 py-1 rounded-md bg-slate-700 text-slate-200';
+          safetyBanner.className = 'rounded-xl p-3 bg-slate-800/80 border border-slate-700 flex items-center justify-between transition-all duration-300';
+          
+          safetyTitle.textContent = 'コード有効（入力可能）';
+          safetyTitle.className = 'text-xs font-semibold text-slate-200';
+          safetySub.textContent = '余裕を持ってログインを完了できます';
+          safetySub.className = 'text-[11px] text-slate-400';
+
+          safetyIconOk.classList.remove('hidden');
+          safetyIconWait.classList.add('hidden');
+
+          waitingOverlay.style.opacity = '0';
+          waitingOverlay.style.pointerEvents = 'none';
+        }
+
+        // ----------------------------------------------
+        // 新しい周期 (30秒) に切り替わった瞬間の発火イベント
+        // ----------------------------------------------
+        if (appState.lastPeriodStep !== -1 && appState.lastPeriodStep !== counter) {
+          // 新コードが生成された瞬間！
+          onNewCodeGenerated(token);
+        }
+        appState.lastPeriodStep = counter;
+        appState.lastCode = token;
+
+      } catch (err) {
+        console.error('TOTP calc error:', err);
+        document.getElementById('totpCodeDisplay').textContent = 'エラー';
+      }
+    }
+
+    // 新しいコード生成時のハンドラ（自動コピー・通知音・トースト）
+    function onNewCodeGenerated(code) {
+      playBeepSound('success');
+
+      if (appState.autoCopy) {
+        navigator.clipboard.writeText(code).then(() => {
+          showToast(`⚡ 新しいコード (${code}) を自動コピーしました！ (期限30秒)`, 'success');
+        }).catch(() => {
+          showToast(`⚡ 新しいコード (${code}) が生成されました！`, 'info');
+        });
+      } else {
+        showToast(`⚡ 新しいコード (${code}) が生成されました`, 'info');
+      }
+
+      // コピーボタンの演出
+      triggerCopyAnimation();
+    }
+
+    // ==============================================
+    // コピー & ポータル連携機能
+    // ==============================================
+    function copyCurrentCode(manual = false) {
+      if (!appState.lastCode) return;
+      navigator.clipboard.writeText(appState.lastCode).then(() => {
+        triggerCopyAnimation();
+        showToast(`📋 コード ${appState.lastCode} をコピーしました！`, 'success');
+        playBeepSound('success');
+      }).catch(err => {
+        showToast('クリップボードへのアクセスが拒否されました', 'error');
+      });
+    }
+
+    function triggerCopyAnimation() {
+      const copyIcon = document.getElementById('copyIcon');
+      const copiedIcon = document.getElementById('copiedIcon');
+      const copyBtnText = document.getElementById('copyBtnText');
+
+      copyIcon.classList.add('hidden');
+      copiedIcon.classList.remove('hidden');
+      copyBtnText.textContent = 'コピー完了！';
+
+      setTimeout(() => {
+        copyIcon.classList.remove('hidden');
+        copiedIcon.classList.add('hidden');
+        copyBtnText.textContent = 'コードをコピー';
+      }, 2000);
+    }
+
+    function sendToPortal() {
+      if (!appState.lastCode) return;
+
+      // 1. クリップボードへ確実にコピー
+      copyCurrentCode();
+
+      // 2. iframeへのPostMessage送信を試行 (相手サイトや拡張機能がリスナーを持っている場合用)
+      const frame = document.getElementById('portalFrame');
+      try {
+        frame.contentWindow.postMessage({
+          type: 'CIT_PORTAL_TOTP_INJECT',
+          totp: appState.lastCode,
+          timestamp: Date.now()
+        }, '*');
+      } catch (e) {
+        console.warn('PostMessage error:', e);
+      }
+
+      showToast('ポータル側入力欄にカーソルを合わせ「Ctrl+V / Cmd+V」で貼り付けできます', 'info', 4000);
+    }
+
+    // ==============================================
+    // ポータル操作 (Iframe & 並列ウィンドウ)
+    // ==============================================
+    function navigatePortalUrl() {
+      const input = document.getElementById('portalUrlInput');
+      let url = input.value.trim();
+      if (!url) return;
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+        input.value = url;
+      }
+      const frame = document.getElementById('portalFrame');
+      frame.src = url;
+      showToast(`ポータルを読み込み中: ${url}`, 'info');
+    }
+
+    function reloadPortalFrame() {
+      const frame = document.getElementById('portalFrame');
+      const current = frame.src;
+      frame.src = 'about:blank';
+      setTimeout(() => {
+        frame.src = current;
+        showToast('ポータル画面を再読み込みしました', 'info');
+      }, 100);
+    }
+
+    function resetPortalUrl() {
+      const defaultUrl = appState.defaultPortalUrl || 'https://portal.it-chiba.ac.jp/';
+      document.getElementById('portalUrlInput').value = defaultUrl;
+      navigatePortalUrl();
+    }
+
+    function dismissBanner() {
+      document.getElementById('iframeNoticeBanner').style.display = 'none';
+    }
+
+    // X-Frame-Options回避の強力な味方：並列ウィンドウモード
+    function toggleSideWindow() {
+      const targetUrl = document.getElementById('portalUrlInput').value || 'https://portal.it-chiba.ac.jp/';
+      const screenW = window.screen.availWidth || 1440;
+      const screenH = window.screen.availHeight || 900;
+      
+      const winWidth = Math.floor(screenW * 0.65);
+      const winHeight = screenH;
+      const leftPos = Math.floor(screenW * 0.35);
+
+      if (appState.sideWindowRef && !appState.sideWindowRef.closed) {
+        appState.sideWindowRef.focus();
+        showToast('並列ウィンドウをアクティブにしました', 'info');
+      } else {
+        appState.sideWindowRef = window.open(
+          targetUrl,
+          'cit_portal_window',
+          `width=${winWidth},height=${winHeight},top=0,left=${leftPos},menubar=no,status=no,toolbar=no`
+        );
+        showToast('画面右側に並列ウィンドウを開きました', 'success');
+      }
+    }
+
+    function openPortalInNewTab() {
+      const url = document.getElementById('portalUrlInput').value || 'https://portal.it-chiba.ac.jp/';
+      window.open(url, '_blank');
+    }
+
+    // モバイル用タブ切り替え
+    function switchMobileTab(tab) {
+      const otpPane = document.getElementById('otpPane');
+      const portalPane = document.getElementById('portalPane');
+      const tabOtp = document.getElementById('mobileTabOtp');
+      const tabPortal = document.getElementById('mobileTabPortal');
+
+      if (tab === 'otp') {
+        otpPane.classList.remove('hidden');
+        portalPane.classList.add('hidden');
+        tabOtp.className = 'px-2.5 py-1 text-xs font-medium rounded-md bg-blue-600 text-white';
+        tabPortal.className = 'px-2.5 py-1 text-xs font-medium rounded-md text-slate-400 hover:text-white';
+      } else {
+        otpPane.classList.add('hidden');
+        portalPane.classList.remove('hidden');
+        tabOtp.className = 'px-2.5 py-1 text-xs font-medium rounded-md text-slate-400 hover:text-white';
+        tabPortal.className = 'px-2.5 py-1 text-xs font-medium rounded-md bg-blue-600 text-white';
+      }
+    }
+
+    // ==============================================
+    // 設定モーダル & 鍵管理
+    // ==============================================
+    function openConfigModal() {
+      renderModalAccountList();
+      document.getElementById('modalPortalDefaultUrl').value = appState.defaultPortalUrl;
+      document.getElementById('configModal').classList.remove('hidden');
+    }
+
+    function closeConfigModal() {
+      const newDefaultUrl = document.getElementById('modalPortalDefaultUrl').value.trim();
+      if (newDefaultUrl) {
+        appState.defaultPortalUrl = newDefaultUrl;
+        localStorage.setItem('cit_totp_portal_url', newDefaultUrl);
+      }
+      document.getElementById('configModal').classList.add('hidden');
+    }
+
+    function renderModalAccountList() {
+      const container = document.getElementById('modalAccountList');
+      container.innerHTML = '';
+
+      appState.accounts.forEach(acc => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between p-3 bg-slate-800/80 rounded-lg border border-slate-700/60';
+        item.innerHTML = `
+          <div>
+            <div class="text-xs font-semibold text-slate-200">${acc.name}</div>
+            <div class="text-[10px] font-mono text-slate-400">${acc.secret.slice(0, 4)}••••${acc.secret.slice(-4)}</div>
+          </div>
+          <div class="flex items-center space-x-2">
+            ${appState.accounts.length > 1 ? `
+              <button onclick="deleteAccount('${acc.id}')" class="text-xs text-rose-400 hover:text-rose-300 px-2 py-1 bg-rose-950/40 border border-rose-900 rounded transition">
+                削除
+              </button>
+            ` : '<span class="text-[10px] text-slate-500">標準</span>'}
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function saveNewAccount() {
+      const nameInput = document.getElementById('modalAccountName');
+      const secretInput = document.getElementById('modalAccountSecret');
+
+      const name = nameInput.value.trim() || '大学ポータル';
+      let secret = secretInput.value.trim();
+
+      if (!secret) {
+        alert('シークレットキーを入力してください');
+        return;
+      }
+
+      // otpauth:// URIの解析
+      if (secret.startsWith('otpauth://')) {
+        try {
+          const url = new URL(secret);
+          const secretParam = url.searchParams.get('secret');
+          if (secretParam) secret = secretParam;
+        } catch (e) {
+          console.warn('URL parse error:', e);
+        }
+      }
+
+      // 余計な文字の除去
+      secret = secret.replace(/[\s-]/g, '').toUpperCase();
+
+      const newId = 'acc_' + Date.now();
+      appState.accounts.push({
+        id: newId,
+        name: name,
+        secret: secret
+      });
+      appState.currentAccountId = newId;
+
+      saveAccounts();
+      renderAccountSelector();
+      renderModalAccountList();
+      onAccountChange();
+
+      nameInput.value = '';
+      secretInput.value = '';
+      showToast(`アカウント「${name}」を追加しました`, 'success');
+    }
+
+    function setSampleDemoAccount() {
+      document.getElementById('modalAccountName').value = '千葉工大 (CIT) デモアカウント';
+      document.getElementById('modalAccountSecret').value = 'JBSWY3DPEHPK3PXP';
+    }
+
+    function deleteAccount(id) {
+      if (!confirm('このアカウントを削除してもよろしいですか？')) return;
+      appState.accounts = appState.accounts.filter(a => a.id !== id);
+      if (appState.currentAccountId === id) {
+        appState.currentAccountId = appState.accounts[0]?.id || '';
+      }
+      saveAccounts();
+      renderAccountSelector();
+      renderModalAccountList();
+      onAccountChange();
+      showToast('アカウントを削除しました', 'info');
+    }
+
+    // ==============================================
+    // トースト通知システム
+    // ==============================================
+    function showToast(message, type = 'info', duration = 3000) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+
+      const bgColors = {
+        success: 'bg-emerald-900/90 border-emerald-600 text-emerald-100',
+        error: 'bg-rose-900/90 border-rose-600 text-rose-100',
+        info: 'bg-slate-900/95 border-slate-700 text-slate-100'
+      };
+
+      toast.className = `p-3 rounded-xl border shadow-xl text-xs flex items-center space-x-2.5 backdrop-blur-sm transform transition-all duration-300 translate-y-2 opacity-0 pointer-events-auto ${bgColors[type] || bgColors.info}`;
+      toast.innerHTML = `
+        <span>${message}</span>
+      `;
+
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
+
+    // ==============================================
+    // PWA & Service Worker
+    // ==============================================
+    let deferredPrompt = null;
+    function setupPwaPrompt() {
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        const btn = document.getElementById('pwaInstallBtn');
+        if (btn) btn.style.display = 'flex';
+      });
+    }
+
+    function installPwa() {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choice) => {
+        if (choice.outcome === 'accepted') {
+          showToast('PWAとしてインストールされました', 'success');
+        }
+        deferredPrompt = null;
+        document.getElementById('pwaInstallBtn').style.display = 'none';
+      });
+    }
+
+    function setupServiceWorker() {
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./service-worker.js')
+            .then(reg => console.log('SW Registered:', reg.scope))
+            .catch(err => console.log('SW Register failed:', err));
+        });
+      }
+    }
+
+    // 開始
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
